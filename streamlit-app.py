@@ -13,7 +13,6 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from scipy import stats
 from datetime import datetime
-import requests
 import yfinance as yf
 import warnings
 warnings.filterwarnings('ignore')
@@ -42,31 +41,6 @@ st.markdown("""
 # ============================================================================
 # FUNCIONES DE DATOS
 # ============================================================================
-
-@st.cache_data(ttl=300)
-def obtener_datos_binance(symbol, interval, limit):
-    """Obtiene datos de Binance"""
-    url = 'https://api.binance.com/api/v3/klines'
-    params = {'symbol': symbol, 'interval': interval, 'limit': limit}
-    
-    try:
-        response = requests.get(url, params=params, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        
-        df = pd.DataFrame(data, columns=[
-            'timestamp', 'open', 'high', 'low', 'close', 'volume',
-            'close_time', 'quote_volume', 'trades', 'taker_buy_base',
-            'taker_buy_quote', 'ignore'
-        ])
-        
-        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-        df['close'] = df['close'].astype(float)
-        df.set_index('timestamp', inplace=True)
-        return df[['close']]
-    except Exception as e:
-        st.error(f"Error: {e}")
-        return None
 
 @st.cache_data(ttl=300)
 def obtener_datos_yahoo(ticker, periodo):
@@ -208,12 +182,12 @@ def plot_qq(returns, nombre):
 
 st.sidebar.title("⚙️ Configuración")
 
-# Activos predefinidos
+# Activos predefinidos (todos via Yahoo Finance)
 ACTIVOS_CRYPTO = {
-    'BTC/USDT': 'BTCUSDT',
-    'ETH/USDT': 'ETHUSDT',
-    'BNB/USDT': 'BNBUSDT',
-    'SOL/USDT': 'SOLUSDT',
+    'BTC/USD': 'BTC-USD',
+    'ETH/USD': 'ETH-USD',
+    'BNB/USD': 'BNB-USD',
+    'SOL/USD': 'SOL-USD',
 }
 
 ACTIVOS_TRADICIONALES = {
@@ -241,13 +215,13 @@ tipo_activo_1 = st.sidebar.selectbox(
 
 if tipo_activo_1 == 'Crypto':
     activo_1_nombre = st.sidebar.selectbox("Seleccionar", list(ACTIVOS_CRYPTO.keys()), key='a1')
-    activo_1 = {'tipo': 'binance', 'symbol': ACTIVOS_CRYPTO[activo_1_nombre]}
+    activo_1 = {'ticker': ACTIVOS_CRYPTO[activo_1_nombre]}
 elif tipo_activo_1 == 'Índices':
     activo_1_nombre = st.sidebar.selectbox("Seleccionar", list(ACTIVOS_TRADICIONALES.keys()), key='a1')
-    activo_1 = {'tipo': 'yahoo', 'ticker': ACTIVOS_TRADICIONALES[activo_1_nombre]}
+    activo_1 = {'ticker': ACTIVOS_TRADICIONALES[activo_1_nombre]}
 else:
     activo_1_nombre = st.sidebar.selectbox("Seleccionar", list(ACTIVOS_FUTURES.keys()), key='a1')
-    activo_1 = {'tipo': 'yahoo', 'ticker': ACTIVOS_FUTURES[activo_1_nombre]}
+    activo_1 = {'ticker': ACTIVOS_FUTURES[activo_1_nombre]}
 
 st.sidebar.subheader("📉 Activo 2 (Comparación)")
 comparar = st.sidebar.checkbox("Comparar con otro activo")
@@ -261,28 +235,28 @@ if comparar:
     
     if tipo_activo_2 == 'Crypto':
         activo_2_nombre = st.sidebar.selectbox("Seleccionar", list(ACTIVOS_CRYPTO.keys()), key='a2')
-        activo_2 = {'tipo': 'binance', 'symbol': ACTIVOS_CRYPTO[activo_2_nombre]}
+        activo_2 = {'ticker': ACTIVOS_CRYPTO[activo_2_nombre]}
     elif tipo_activo_2 == 'Índices':
         activo_2_nombre = st.sidebar.selectbox("Seleccionar", list(ACTIVOS_TRADICIONALES.keys()), key='a2')
-        activo_2 = {'tipo': 'yahoo', 'ticker': ACTIVOS_TRADICIONALES[activo_2_nombre]}
+        activo_2 = {'ticker': ACTIVOS_TRADICIONALES[activo_2_nombre]}
     else:
         activo_2_nombre = st.sidebar.selectbox("Seleccionar", list(ACTIVOS_FUTURES.keys()), key='a2')
-        activo_2 = {'tipo': 'yahoo', 'ticker': ACTIVOS_FUTURES[activo_2_nombre]}
+        activo_2 = {'ticker': ACTIVOS_FUTURES[activo_2_nombre]}
 
 st.sidebar.subheader("📅 Periodo")
 periodo_map = {
-    '1 mes': ('1mo', 30),
-    '3 meses': ('3mo', 90),
-    '6 meses': ('6mo', 180),
-    '1 año': ('1y', 365),
-    '2 años': ('2y', 730)
+    '1 mes': '1mo',
+    '3 meses': '3mo',
+    '6 meses': '6mo',
+    '1 año': '1y',
+    '2 años': '2y'
 }
 periodo_sel = st.sidebar.select_slider(
     "Seleccionar periodo",
     options=list(periodo_map.keys()),
     value='6 meses'
 )
-periodo_yahoo, periodo_binance = periodo_map[periodo_sel]
+periodo_yahoo = periodo_map[periodo_sel]
 
 st.sidebar.subheader("🎯 Análisis Fat Tails")
 umbral_sigma = st.sidebar.slider(
@@ -306,11 +280,7 @@ st.markdown("---")
 # ============================================================================
 
 with st.spinner('Descargando datos...'):
-    # Activo 1
-    if activo_1['tipo'] == 'binance':
-        df1 = obtener_datos_binance(activo_1['symbol'], '1d', periodo_binance)
-    else:
-        df1 = obtener_datos_yahoo(activo_1['ticker'], periodo_yahoo)
+    df1 = obtener_datos_yahoo(activo_1['ticker'], periodo_yahoo)
     
     if df1 is not None:
         df1 = calcular_retornos(df1)
@@ -318,12 +288,8 @@ with st.spinner('Descargando datos...'):
         stats_1, media_1, std_1 = analizar_distribucion(returns_1)
         fat_tails_1 = analizar_fat_tails(returns_1, media_1, std_1, umbral_sigma)
     
-    # Activo 2
     if comparar:
-        if activo_2['tipo'] == 'binance':
-            df2 = obtener_datos_binance(activo_2['symbol'], '1d', periodo_binance)
-        else:
-            df2 = obtener_datos_yahoo(activo_2['ticker'], periodo_yahoo)
+        df2 = obtener_datos_yahoo(activo_2['ticker'], periodo_yahoo)
         
         if df2 is not None:
             df2 = calcular_retornos(df2)
@@ -469,10 +435,10 @@ if df1 is not None:
     
     # Alertas
     if stats_1['Kurtosis'] > 3:
-        st.warning(f"⚠️ **{activo_1_nombre}** muestra curtosis muy alta ({stats_1['Kurtosis']:.2f}), indicando FAT TAILS significativos. Los modelos que asumen normalidad subestimarán el riesgo.")
+        st.warning(f"⚠️ **{activo_1_nombre}** muestra curtosis muy alta ({stats_1['Kurtosis']:.2f}), indicando FAT TAILS significativos.")
     
     if fat_tails_1['Factor +'] > 2:
-        st.error(f"🔥 **{activo_1_nombre}** tiene {fat_tails_1['Factor +']:.1f}x más eventos extremos que lo esperado en distribución normal!")
+        st.error(f"🔥 **{activo_1_nombre}** tiene {fat_tails_1['Factor +']:.1f}x más eventos extremos que lo esperado!")
     
     if comparar and df2 is not None:
         vol_ratio = stats_2['Std (%)'] / stats_1['Std (%)']
@@ -485,7 +451,7 @@ else:
 st.markdown("---")
 st.markdown("""
 <div style='text-align: center; color: #666;'>
-    <p>Quant Dashboard v1.0 | Datos: Binance API + Yahoo Finance</p>
+    <p>Quant Dashboard v1.0 | Datos: Yahoo Finance</p>
     <p>⚠️ Este dashboard es solo para análisis. No constituye asesoría financiera.</p>
 </div>
 """, unsafe_allow_html=True)
